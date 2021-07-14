@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>C1312193</title>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+        <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+        <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+        <script src="//d3js.org/d3.v6.min.js" charset="utf-8"></script>
+        <style>
+            body{
+                font-family:sans-serif
+            }
+            .area{
+                stroke: ivory;
+                stroke-width: 2px;
+                fill-opacity: 1;
+            }
+            .value_label{
+                color:ivory;
+                font-weight:bold;
+                font-size: 20px;
+                text-anchor:end;
+                pointer-events: none;
+            }
+            .value_label_median{
+                font-size: 18px;
+                text-anchor: end;
+                pointer-events: none;
+            }
+            .area_label{
+                color:ivory;
+                font-weight:bold;
+                font-size: 20px;
+                pointer-events: none;
+            }
+            .bar_value_label{
+                color:ivory;
+                font-size: 12px;
+                text-anchor:end;
+                pointer-events: none;
+            }
+            .bar_area_label{
+                color:ivory;
+                font-size: 16px;
+                text-anchor: start;
+                pointer-events: none;
+            }
+            .tooltip{
+                position: absolute;
+                background:hsla(0, 0%, 0%, 0.8);
+                color: ivory;
+                text-align: center;
+                font-size: 14;
+                border-radius: 8px;
+                padding: 5px;
+                pointer-events: none;
+            }
+            .left{
+                float: left;
+                width: 19%;
+                padding-left:10px;
+                padding-right: 5px;
+                height: 90%;
+                position: relative;
+            }
+            .distance_label{
+                font-size: 20px;
+                pointer-events: none;
+            }
+            .area_label_extra{
+                pointer-events: none;
+                font-size: 18px;
+            }
+
+        </style>
+    </head>
+    <body style="width: 80%; margin:auto;">    
+        <div style="width: 100%; height: 850px;"">
+            <h1 style="margin: 2px; margin-left: 15px; font-size: 38px; text-align: left;">Is the grass really greener? Explore <span style="color:#2e8540">parks</span> across Great Britain</h1>
+            <div id="left" class="left">
+                <label for="dropdown"><h2 style="margin:5px; margin-bottom: 13px; font-size: 24px;">Search for your area</h2></label>  
+                <select id="dropdown" multiple="multiple" style="width: 100%; margin:5px;margin-bottom: 15px;"></select> 
+                <h2 style="margin:5px; font-size: 18px;">Average number of nearby <span style="color:#2e8540">parks</span></h2>
+                <div style = "width: 100%; margin-left: 5px;">
+                    <text style="margin-bottom: 0px; font-size: 14px;"><i>Park density within a 10 minute walk of the average home (1,000m radius)</i></text>     
+                </div>                   
+            </div>
+            <div id="vis" style="margin: 0;float: left; width: 80%;">
+                <div style="width: 100%; margin: 0; margin-left: 50px;">
+                    <h2 style="margin:5px; font-size: 24px;">Average <span style="color:#2e8540">size (meters squared)</span> and <span style="color:#ee6352;">proximity (metres)</span> of the nearest <span style="color:#2e8540">park</span></h2>
+                </div>
+                
+            </div>
+        </div>
+
+        <script>
+            $("#dropdown").select2({
+                allowClear:true,
+                theme:"classic",
+                maximumSelectionLength:10
+            });
+            $('#dropdown').on('select2:open', function (e) {
+                $('ul.select2-results__options').css('max-height', "600px");
+            });
+            const maxDataItems = 5;
+            const maxDataValue = 10;
+            const width = 1255;
+            const height = 808;
+            const margin = {
+                top: 10,
+                left: 50,
+                right: 50,
+                bottom: 50
+            };
+            const bar_width = 290;
+            const bar_height = 500;
+            const bar_margin = {
+                top: 0,
+                left: 5,
+                right: 10,
+                bottom: 0
+            };
+            const animate = 1000;
+            const rect_colour = "#2e8540"
+            const secondary_colour = "#ee6352"
+            const highlight = "#aacc00"
+            const rect_colour_select = "#3d4a3d"
+            const text_colour = "ivory"
+            const padding = 5;
+            const zeroPad = (num) => String(num).padStart(2, '0');
+            let svg = d3.select("#vis").append("svg").attr("width", width).attr("height", height);
+            let bar = d3.select("#left").append("svg").attr("width",bar_width).attr("height",bar_height);
+
+            function wrap() {
+                var self = d3.select(this),
+                    textLength = self.node().getComputedTextLength(),
+                    text = self.text();
+                while (textLength > (width - 2 * padding) && text.length > 0) {
+                    text = text.slice(0, -1);
+                    self.text(text + '...');
+                    textLength = self.node().getComputedTextLength();
+                    }
+                } 
+                
+
+            svg.append("g")
+                .attr("id", "xaxis")
+                .attr("class","axis")
+                .attr("transform", `translate(0,${height-margin.bottom})`);
+
+            svg.append("g")
+                .attr("id", "yaxis")
+                .attr("class","axis")
+                .attr("transform", `translate(${margin.left},0)`);
+            
+            
+            var tooltip = d3.select("body")
+                    .append("div")
+                    .attr("class", "tooltip")
+                    .style("opacity", 0);
+            
+            // Read in data    
+            d3.csv("data.csv", d => {
+                return {
+                    "Name": d["Name"],
+                    "Code": d["Code"],
+                    "Region": d["Region"],
+                    "RegionCode": d["RegionCode"],
+                    "Country":d["Country"],
+                    "CountryCode":d["CountryCode"],
+                    "Geography":d["Geography"],
+                    "Size":+d["Average size of nearest park or public garden or playing field (m2)"],
+                    "Distance":+d["Average distance to nearest park or public garden or playing field (m)"],
+                    "Number":+d["Average number of parks or public gardens or playing fields within 1,000 m radius"],
+                    "Radius":+d["Average combined size of parks or public gardens or playing fields within 1,000 m radius (m2)"],
+                    "Median size of nearest park or public garden or playing field (m2)":+d["Median size of nearest park or public garden or playing field (m2)"]
+                }
+            })
+            .then(data => {
+                // Add all geographies (sorted) to dropdown
+                geographies = data.map(d=>d["Name"]).sort()
+                d3.select("#dropdown").selectAll("options").data(geographies).enter().append("option").text(d => d).attr("value", d=> d);
+                $("#dropdown").val(["Cardiff","Vale of Glamorgan","Swansea","Newport","Rhondda Cynon Taf"]);
+
+                // Starting options with starting vis
+                var options = $("#dropdown").select2("val");
+                update(options);
+
+                // If options chane - rebuild vis
+                $("#dropdown").on("change", function () {
+                    var options = $("#dropdown").select2("val")
+                    if (options){
+                        update(options)
+                    }
+                });
+                function update(options){
+                    d3.selectAll(".area").attr("fill",rect_colour)
+                    // Get main dataset from selected options - sort by size
+
+
+                    let maindata = 
+                        data.filter(function(d,i){return options.indexOf(d["Name"]) >= 0 })
+                        .sort((a, b) => parseFloat(b.Size) - parseFloat(a.Size));
+                    let bardata =
+                        data.filter(function(d,i){return options.indexOf(d["Name"]) >= 0 })
+                        .sort((a, b) => parseFloat(b.Number) - parseFloat(a.Number));
+
+                    // Remove all expanded areas
+                    d3.selectAll(".clone").remove();
+                    
+                    let bar_max_x = d3.max(maindata.map(d => d.Number));
+                    let bar_rect_height = 20;              
+                    let bar_xScale = d3.scaleLinear()
+                        .domain([0, bar_max_x])
+                        .range([bar_margin.left, bar_width-bar_margin.left-bar_margin.right]);
+                    let bar_yScale = d3.scaleOrdinal()
+                        .domain([0,1,2,3,4,5,6,7,8,9])
+                        .range([bar_margin.top+30,
+                        bar_margin.top+1*bar_rect_height+2*30,
+                        bar_margin.top+2*bar_rect_height+3*30,
+                        bar_margin.top+3*bar_rect_height+4*30,
+                        bar_margin.top+4*bar_rect_height+5*30,
+                        bar_margin.top+5*bar_rect_height+6*30,
+                        bar_margin.top+6*bar_rect_height+7*30,
+                        bar_margin.top+7*bar_rect_height+8*30,
+                        bar_margin.top+8*bar_rect_height+9*30,
+                        bar_margin.top+9*bar_rect_height+10*30]);                    
+
+                    d3.selectAll(".bar_park").remove();
+                    
+                   
+                    bar.selectAll(".bar_park")
+                        .data(bardata)
+                        .enter()
+                        .append("g")
+                        .attr("class","bar_park")
+                        .attr("id", d=>"Bar_"+ d["Name"].replace(/([^a-z0-9]+)/gi,""));
+                    
+                    d3.selectAll(".bar_park")
+                        .append("rect")
+                        .attr("class","bar_number")
+                        .attr("fill","darkgrey")
+                        .attr("height", bar_rect_height)
+                        .attr("y", (d,i) =>bar_yScale(i))
+                        .attr("x",bar_margin.left)
+                        .transition()
+                        .duration(animate)                        
+                        .attr("width", d => bar_xScale(d.Number));
+                    d3.selectAll(".bar_park")
+                        .append("text")
+                        .attr("class", "bar_value_label")
+                        .attr("fill",text_colour)
+                        .attr("y", (d,i) =>bar_yScale(i)+15)
+                        .attr("x",bar_margin.left)
+                        .transition().duration(animate)
+                        .attr("x", d => bar_margin.left+bar_xScale(d.Number)-padding)
+                        .text(d => d.Number.toFixed(2));
+                    d3.selectAll(".bar_park")
+                        .append("text")
+                        .attr("class", "bar_area_label")
+                        .attr("fill","black")
+                        .attr("y", (d,i) =>bar_yScale(i)-5)
+                        .attr("x",bar_margin.left)
+                        .transition().duration(animate)
+                        .attr("x", bar_margin.left)
+                        .text(d => d["Name"]);
+                    
+                    
+                    let max = d3.max(maindata.map(d => d.Size));
+                    let min = d3.min(maindata.map(d => d.Size));
+                    let dist_max = d3.max(maindata.map(d => d.Distance));            
+                    let xScale = d3.scaleSqrt()
+                        .domain([0, max])
+                        .range([margin.left, width-margin.right]);
+                    let yScale = d3.scaleSqrt()
+                        .domain([0, max])
+                        .range([height-margin.bottom,margin.top]);
+                    
+                    let lineScale = d3.scaleLinear()
+                        .domain([0,dist_max])
+                        .range([height-margin.bottom, yScale(min)+60])
+                    let xaxis = d3.axisBottom(xScale)
+                                .tickValues(maindata.map(d => d.Size))
+                                .tickFormat(d => Math.sqrt(d*105/68).toFixed(0)+"m");
+                    let yaxis = d3.axisLeft(yScale)
+                                .tickValues(maindata.map(d => d.Size))
+                                .tickFormat(d => Math.sqrt(d*68/105).toFixed(0)+"m");
+
+                    var park = svg.selectAll(".park").data(maindata, d=>d["Name"])
+                    var park_exit = park.exit()
+                    var park_enter = park.enter().append("g").attr("class","park").attr("id", d=>d["Name"].replace(/([^a-z0-9]+)/gi,""))
+                        .on("mouseover", function(event,d) {
+                            d3.select(this)
+                            .select(".area")
+                            .style("stroke", highlight);
+
+                            let bar_id = "#Bar_"+d["Name"].replace(/([^a-z0-9]+)/gi,"");
+                            d3.select(bar_id)
+                            .select(".bar_number")
+                            .attr("fill",rect_colour);
+
+                            tooltip
+                            .transition()
+                            .duration(200)
+                            .style("opacity", 0.9);
+                            tooltip.html("<b>"+d["Name"] +"</b><br/>" + "<i>Click for more info</i>")
+                            .style("left", (event.pageX) + 15+ "px")
+                            .style("top", (event.pageY - 50) + "px");
+                        })
+                        .on("mousemove", function(event){
+                            tooltip
+                            .style("top", (event.pageY) -50 + "px")
+                            .style("left",(event.pageX)+15+"px");
+                        })
+                        .on("mouseout", function(event,d) {
+                            d3.select(this)
+                            .select(".area")
+                            .style("stroke", "ivory");
+
+                            let bar_id = "#Bar_"+d["Name"].replace(/([^a-z0-9]+)/gi,"");
+                            d3.select(bar_id)
+                            .select(".bar_number")
+                            .attr("fill","darkgrey");
+
+                            tooltip
+                            .transition()
+                            .duration(200)
+                            .style("opacity", 0)
+                        })
+                        .on("click", function(event,d){
+                        
+                            d3.select(this)
+                            .clone([true])
+                            .raise()
+                            .attr("class","clone")
+                            .on("click", function(){
+                                d3.select(this)
+                                .select(".area")
+                                .transition().duration(animate)                        
+                                .attr("width", d => xScale(d.Size)-margin.right-padding)
+                                .attr("height", d=> height-margin.bottom-yScale(d.Size)-padding)
+                                .attr("y", d =>yScale(d.Size))
+                                .attr("fill",rect_colour);
+
+                                d3.select(this)
+                                .selectAll(".value_label,.area_label,.area_label_extra,.radius,.radius_label,.clone_label,.value_label_median,.hist").remove();
+                                                            
+                                setTimeout(function(){
+                                    d3.selectAll(".clone").remove();
+                                },animate);
+
+                                d3.selectAll(".park").selectAll(".area")
+                                .transition().duration(animate)
+                                .attr("fill",rect_colour);
+
+                                d3.selectAll(".axis")
+                                .transition().duration(animate)
+                                .attr("opacity",1);
+
+                                let bar_id = "#Bar_"+d["Name"].replace(/([^a-z0-9]+)/gi,"");
+                                d3.selectAll(bar_id)
+                                .select(".bar_number")
+                                .attr("fill","darkgrey");
+
+                            })
+                            .on("mouseover", function(event,d) {
+                                let bar_id = "#Bar_"+d["Name"].replace(/([^a-z0-9]+)/gi,"");
+                                d3.select(bar_id)
+                                .select(".bar_number")
+                                .attr("fill",rect_colour_select);
+
+                                tooltip
+                                .transition()
+                                .duration(200)
+                                .style("opacity", 0.9);
+                                tooltip.html("Click to return")
+                                .style("left", (event.pageX) + 15+ "px")
+                                .style("top", (event.pageY - 50) + "px");
+                            })
+                            .on("mousemove", function(event){
+                                tooltip
+                                .style("top", (event.pageY) -50 + "px")
+                                .style("left",(event.pageX)+15+"px");
+                            })
+                            .on("mouseout", function(event,d) {
+                                 tooltip
+                                .transition()
+                                .duration(200)
+                                .style("opacity", 0)
+                            })
+                            .select(".area")
+                            .transition().duration(animate)
+                            .attr("width", xScale(max)-margin.right-padding)
+                            .attr("height", height-margin.bottom-yScale(max)-padding)
+                            .attr("y", yScale(max))
+                            .attr("fill",rect_colour_select)
+                            .style("stroke", "ivory");
+
+                            d3.selectAll(".clone")
+                            .select(".value_label")
+                            .transition()
+                            .duration(animate)
+                            .attr("x", d => xScale(max)-padding)
+                            .attr("y", d => yScale(max)+25);
+
+                            setTimeout(function(){
+                                d3.selectAll(".clone")
+                                .select(".value_label")
+                                .text(d => "Average size: "+Math.round(d.Size).toLocaleString()+"\u33A1")
+
+                                d3.selectAll(".clone")
+                                .append("text")
+                                .attr("class","value_label_median")
+                                .attr("x", d => xScale(max)-padding)
+                                .attr("y", d => yScale(max)+50)
+                                .attr("fill",text_colour)
+                                .text(d => "Median size: "+Math.round(d["Median size of nearest park or public garden or playing field (m2)"]).toLocaleString()+"\u33A1");
+
+                                d3.selectAll(".clone")
+                                .append("text")
+                                .attr("class","area_label_extra")
+                                .attr("x", d => 2*padding+margin.left)
+                                .attr("y", d => yScale(max)+50)
+                                .attr("fill",text_colour)
+                                .text(d=>d.Geography+" ("+d.Code+")");
+
+                                d3.selectAll(".clone")
+                                .append("text")
+                                .attr("class","area_label_extra")
+                                .attr("x", d => 2*padding+margin.left)
+                                .attr("y", d => yScale(max)+75)
+                                .attr("fill",text_colour)
+                                .text(d=>"Region: "+d.Region+" ("+d.RegionCode+")");
+
+                                d3.selectAll(".clone")
+                                .append("text")
+                                .attr("class","area_label_extra")
+                                .attr("x", d => 2*padding+margin.left)
+                                .attr("y", d => yScale(max)+100)
+                                .attr("fill",text_colour)
+                                .text(d=>"Country: "+d.Country+" ("+d.CountryCode+")");
+
+                                let radius_average = d3.mean(maindata.map(d => d.Radius));
+                                let radiusdata = [
+                                    {"Name":d.Name,"Radius":d.Radius},
+                                    {"Name":"Selection average","Radius":radius_average},
+                                    {"Name":"Great Britain average","Radius":391230.758626088}
+                                ].sort((a, b) => parseFloat(b.Radius) - parseFloat(a.Radius))
+                                var radius = d3.select(".clone").selectAll(".radius").data(radiusdata, (d,i) => (d,i)).enter()
+                                var radiusScale = d3.scaleLinear()
+                                .domain([0,d3.max(radiusdata.map(d=> d.Radius))])
+                                .range([0,90])
+                                /*var colourScale = d3.scaleLinear()
+                                .domain([0,d3.max(radiusdata.map(d=> d.Radius))])
+                                .range([text_colour,rect_colour])*/
+                                
+                                d3.select(".clone").selectAll("radius").data(radiusdata, (d,i) => (d,i)).enter()                        
+                                .append("circle")
+                                .attr("class","radius")
+                                .attr("fill",rect_colour)
+                                .attr("r", d=>radiusScale(d.Radius))
+                                .attr("stroke",secondary_colour)
+                                .attr("stroke-width","4px")
+                                //.attr("opacity","0.8")
+                                .attr("cx",margin.left+130)
+                                .attr("cy", (d,i) => height-margin.bottom-310+i*100);
+
+                                d3.select(".clone").selectAll("radius_label").data(radiusdata, (d,i) => (d,i)).enter()                        
+                                .append("text")
+                                .attr("class","radius_label")
+                                .attr("fill",text_colour)
+                                .attr("x",margin.left+130)
+                                .attr("y", (d,i) => height-margin.bottom-305+i*100)
+                                .attr("text-anchor","middle")
+                                .text(d=>(Math.round(d.Radius).toLocaleString()+"\u33A1"));
+
+                                d3.select(".clone").selectAll("radius_label").data(radiusdata, (d,i) => (d,i)).enter()                        
+                                .append("text")
+                                .attr("class","radius_label")
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","16px")
+                                .attr("x",d=>margin.left+130+radiusScale(d.Radius)+10)
+                                .attr("y", (d,i) => height-margin.bottom-305+i*100)
+                                .text(d=>d.Name.replace(/ *\([^)]*\) */g, ""));
+
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("class","radius_label")
+                                .attr("x",margin.left+30)
+                                .attr("y", height-margin.bottom-440)
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","20px")
+                                .text("Average combined size of nearby parks");
+
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("class","radius_label")
+                                .attr("x",margin.left+30)
+                                .attr("y", height-margin.bottom-415)
+                                .attr("fill",text_colour)
+                                .text("Within a 10 minute walk (1,000m radius)");
+
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("fill",rect_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("class","clone_label")
+                                .attr("x",margin.left+30)
+                                .attr("y", 150)
+                                .text(function(d){if(d.Size < 100452.433296045){
+                                    return d.Size.toLocaleString("en", {maximumFractionDigits: 0})+"\u33A1"}
+                                else{return d.Size.toLocaleString("en", {maximumFractionDigits: 0})+"\u33A1"}
+                                });
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("class","clone_label")
+                                .attr("x",margin.left+30)
+                                .attr("max-width",width-margin.left-margin.right-60+"px")
+                                .attr("overflow-wrap", "break-word")
+                                .attr("y", 175)
+                                .text(function(d){if(d.Size < 100452.433296045){
+                                    return "Residents' nearest park is smaller than the Great Britain average ("+100452.433296045.toLocaleString("en", {maximumFractionDigits: 0})+"\u33A1"+")"}
+                                else{return "Residents' nearest park is larger than the Great Britain average ("+100452.433296045.toLocaleString("en", {maximumFractionDigits: 0})+"\u33A1"+")"}
+                                });
+                                
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("fill",secondary_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("class","clone_label")
+                                .attr("x",margin.left+30)
+                                .attr("y", 225)
+                                .text(function(d){
+                                    if(d.Distance < 382.83469236343){
+                                        return d.Distance.toLocaleString("en", {maximumFractionDigits: 0})+"m"}
+                                else{return d.Distance.toLocaleString("en", {maximumFractionDigits: 0})+"m"}
+                                });
+                                d3.select(".clone")
+                                .append("text")
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("class","clone_label")
+                                .attr("x",margin.left+30)
+                                .attr("max-width",width-margin.left-margin.right-60+"px")
+                                .attr("y", 250)
+                                .text(function(d){
+                                    if(d.Distance < 382.83469236343){
+                                        return "Residents are closer to parks than the Great Britain average ("+382.83469236343.toLocaleString("en", {maximumFractionDigits: 0})+"m)"}
+                                else{return "Residents are further from parks than the Great Britain average ("+382.83469236343.toLocaleString("en", {maximumFractionDigits: 0})+"m)"}});
+
+                                var thisdata = d.Distance;
+                                var histinput = "Distance";
+                                var hmean = d3.mean(data.map(d=>d[histinput]))
+                                var hstd = d3.deviation(data.map(d=>d[histinput]))
+                                var histData = data.map(d=>d[histinput]).filter(d=> d>=(hmean-3*hstd) && d<=(hmean+3*hstd))
+                                var histWidth = 700;
+                                var histHeight = 200;
+                                var histMargin = {"left":50,"right":0,"bottom":50,"top":0}                               
+                                var histXScale = d3.scaleLinear()
+                                    .domain([d3.min(histData), d3.max(histData)])
+                                    .range([histMargin.left, histWidth-histMargin.left-histMargin.right]);                                
+                                var histogram = d3.bin()
+                                    .value(d=>d)
+                                    .domain(histXScale.domain())
+                                    .thresholds(histXScale.ticks(50));
+                                var histbins = histogram(histData)
+                                console.log(histbins);                            
+                                var histYScale =d3.scaleLinear()
+                                    .domain([0, d3.max(histbins, d=> d.length)])
+                                    .range([histHeight-histMargin.bottom, 0])
+
+                                var hist = d3.select(".clone")
+                                .append('svg')
+                                .attr("x",width-margin.right-histWidth-padding)
+                                .attr("y",height-margin.bottom-padding-histHeight)
+                                .attr("width",histWidth)
+                                .attr("height",histHeight)
+                                .attr("class", "hist");
+
+                                hist.selectAll("rect")
+                                    .data(histbins)
+                                    .enter()
+                                    .append("rect")
+                                    .attr("class", "park")
+                                    .attr("fill",function(d){
+                                        if(d.includes(thisdata)){ return secondary_colour} else{ return "darkgrey"}})
+                                    .attr("x", d=> histXScale(d.x0))
+                                    .attr("y", d=> histYScale(d.length))
+                                    .attr("width", d=> 5 )
+                                    .attr("height", d=> histHeight-histMargin.bottom- histYScale(d.length));
+
+                                hist.append("g")
+                                    .attr("transform", "translate(0,"+(histHeight-histMargin.bottom)+")")
+                                    .attr("class","haxis")
+                                    .call(d3.axisBottom(histXScale));
+
+                                hist.append("text")
+                                .attr("class","park")
+                                .attr("x",histWidth-histMargin.left-padding)
+                                .attr("y",24)
+                                .attr("fill",secondary_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("text-anchor","end")
+                                .text(function(){var x = Math.floor((data.map(d=>d[histinput]).sort((a,b)=>b-a).indexOf(thisdata)+1)*100/data.length);
+                                if(x>=50){return "Proximity: top "+(100-x)+" percent"}else{return "Proximity: bottom "+x+" percent"}});
+
+                                hist.append("text")
+                                .attr("class","park")
+                                .attr("x",histWidth-histMargin.left-padding)
+                                .attr("y",50)
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("text-anchor","end")
+                                .text("Of all areas (closer is better)");
+
+                                hist.selectAll(".haxis path").style("stroke",text_colour);
+                                hist.selectAll(".haxis text").style("fill",text_colour);
+                                hist.selectAll(".haxis line").style("stroke",text_colour);
+
+                                var thisdata = d.Size;
+                                var histinput = "Size";
+                                var hmean = d3.mean(data.map(d=>d[histinput]))
+                                var hstd = d3.deviation(data.map(d=>d[histinput]))
+                                var histData = data.map(d=>d[histinput]).filter(d=> d>=(hmean-3*hstd) && d<=(hmean+3*hstd))
+                                var histWidth = 700;
+                                var histHeight = 200;
+                                var histMargin = {"left":50,"right":0,"bottom":50,"top":0}                               
+                                var histXScale = d3.scaleLinear()
+                                    .domain([d3.min(histData), d3.max(histData)])
+                                    .range([histMargin.left, histWidth-histMargin.left-histMargin.right]);                                
+                                var histogram = d3.bin()
+                                    .value(d=>d)
+                                    .domain(histXScale.domain())
+                                    .thresholds(histXScale.ticks(50));
+                                var histbins = histogram(histData)                        
+                                var histYScale =d3.scaleLinear()
+                                    .domain([0, d3.max(histbins, d=> d.length)])
+                                    .range([histHeight-histMargin.bottom, 0])
+
+                                var hist = d3.select(".clone")
+                                .append('svg')
+                                .attr("x",width-margin.right-histWidth-padding)
+                                .attr("y",height-margin.bottom-padding-histHeight-200)
+                                .attr("width",histWidth)
+                                .attr("height",histHeight)
+                                .attr("class", "hist");
+
+                                hist.selectAll("rect")
+                                    .data(histbins)
+                                    .enter()
+                                    .append("rect")
+                                    .attr("class", "park")
+                                    .attr("fill",function(d){
+                                        if(d.includes(thisdata)){ return rect_colour} else{ return "darkgrey"}})
+                                    .attr("x", d=> histXScale(d.x0))
+                                    .attr("y", d=> histYScale(d.length))
+                                    .attr("width", d=> 5 )
+                                    .attr("height", d=> histHeight-histMargin.bottom- histYScale(d.length));
+
+                                hist.append("g")
+                                    .attr("transform", "translate(0,"+(histHeight-histMargin.bottom)+")")
+                                    .attr("class","haxis")
+                                    .call(d3.axisBottom(histXScale));
+
+                                hist.append("text")
+                                .attr("class","park")
+                                .attr("x",histWidth-histMargin.left-padding)
+                                .attr("y",24)
+                                .attr("fill",rect_colour)
+                                .attr("font-weight","bold")
+                                .attr("font-size","24px")
+                                .attr("text-anchor","end")
+                                .text(function(){var x = Math.floor((data.map(d=>d[histinput]).sort((a,b)=>a-b).indexOf(thisdata)+1)*100/data.length);
+                                if(x>=50){return "Size: top "+(100-x)+" percent"}else{return "Size: bottom "+x+" percent"}});
+
+                                hist.append("text")
+                                .attr("class","park")
+                                .attr("x",histWidth-histMargin.left-padding)
+                                .attr("y",50)
+                                .attr("fill",text_colour)
+                                .attr("font-weight","bold")
+                                .attr("text-anchor","end")
+                                .text("Of all areas (bigger is better)");
+
+                                hist.selectAll(".haxis path").style("stroke",text_colour);
+                                hist.selectAll(".haxis text").style("fill",text_colour);
+                                hist.selectAll(".haxis line").style("stroke",text_colour);
+
+                                
+                                                         
+                            },animate)
+
+                            d3.selectAll(".clone")
+                            .select(".area_label")
+                            .transition()
+                            .duration(animate)
+                            .attr("x", d => 2*padding+margin.left)
+                            .attr("y", d => yScale(max)+25)
+                            .text(d=> d.Name.replace(/ *\([^)]*\) */g, ""));
+
+                            d3.selectAll(".clone")
+                            .selectAll(".distance_line,.distance_line_animate,.distance_label,.distance_endpoint")
+                            .remove();
+
+                            d3.selectAll(".park").selectAll(".area")
+                            .attr("fill","grey");
+                            
+                            svg.selectAll(".axis")
+                            .transition().duration(animate)
+                            .attr("opacity",0);
+                            
+                        });
+
+                    park
+                        .selectAll(".area")
+                        .transition()
+                        .duration(animate)                        
+                        .attr("width", d => xScale(d.Size)-margin.right-padding)
+                        .attr("height", d=> height-margin.bottom-yScale(d.Size)-padding)
+                        .attr("y", d =>yScale(d.Size));
+                    park
+                        .selectAll(".value_label")
+                        .transition()
+                        .duration(animate)
+                        .attr("x", d => xScale(d.Size)-padding)
+                        .attr("y", d => yScale(d.Size)+25);
+                    park
+                        .selectAll(".area_label")
+                        .transition()
+                        .duration(animate)
+                        .attr("x", d => 2*padding+margin.left)
+                        .attr("y", d => yScale(d.Size)+25);
+                    
+                    park_enter                
+                        .append("rect")
+                        .attr("class", "area")
+                        .attr("fill",rect_colour)
+                        .attr("width",0)
+                        .attr("height",0)
+                        .attr("y",height-margin.bottom)
+                        .attr("x",margin.left+padding)
+                        .transition()
+                        .duration(animate)
+                        .attr("width", d => xScale(d.Size)-margin.right-padding)
+                        .attr("height", d=> height-margin.bottom-yScale(d.Size)-padding)
+                        .attr("y", d =>yScale(d.Size));
+                    park_enter
+                        .append("text")
+                        .attr("class", "value_label")
+                        .attr("fill",text_colour)
+                        .attr("y",height)
+                        .attr("x",margin.left)
+                        .transition()
+                        .duration(animate)
+                        .attr("x", d => xScale(d.Size)-padding)
+                        .attr("y", d => yScale(d.Size)+25)
+                        .text(d => Math.round(d.Size).toLocaleString()+"\u33A1");
+                    park_enter
+                        .append("text")
+                        .attr("class", "area_label")
+                        .attr("fill","ivory")
+                        .attr("y",height)
+                        .attr("x",margin.left)
+                        .transition()
+                        .duration(animate)
+                        .attr("x", d => 2*padding+margin.left)
+                        .attr("y", d => yScale(d.Size)+25)
+                        .text(d => d["Name"]);
+
+                    setTimeout(function(){
+                        park_enter
+                        .append("line")
+                        .attr("class","distance_line")
+                        .attr("y1",height-margin.bottom-padding-2)
+                        .attr("x1", d=> xScale(d.Size)-padding-10)
+                        .attr("x2", d=> xScale(d.Size)-padding-10)
+                        .attr("y2",d=> lineScale(d.Distance)+padding)
+                        .attr("stroke","ivory")
+                        .attr("stroke-dasharray","4 4")
+                        .attr("stroke-width","2px");                        
+                        
+                        park_enter
+                        .append("line")
+                        .attr("class","distance_line_animate")
+                        .attr("y1",height-margin.bottom-padding-2)
+                        .attr("x1", d=> xScale(d.Size)-padding-10)
+                        .attr("x2", d=> xScale(d.Size)-padding-10)
+                        .attr("y2",height-margin.bottom-padding-2)
+                        .attr("stroke",secondary_colour)
+                        .attr("stroke-dasharray","4 4")
+                        .attr("stroke-width","4px")
+                        .transition()
+                        .ease(d3.easeLinear)
+                        .duration(d =>d.Distance*10)
+                        .attr("y2",d=> lineScale(d.Distance)+padding)
+
+
+                        park_enter
+                        .append("text")
+                        .attr("class","distance_label")
+                        .attr("transform", d=> "translate("+(xScale(d.Size)-padding-30).toString()+","+(height-margin.bottom-padding-10).toString()+"),"+"rotate(-90)")
+                        .attr("fill",text_colour)
+                        .text(d=>Math.round(d.Distance/100)+" minute walk ("+ (Math.round(d.Distance)).toLocaleString(0)+"m)");
+
+                        park_enter
+                        .append("path")
+                        .attr("class","distance_endpoint")
+                        .attr("d", "M0,0l-8.8-17.7C-12.1-24.3-7.4-32,0-32h0c7.4,0,12.1,7.7,8.8,14.3L0,0z")
+                        .attr("transform", d=> "translate("+(xScale(d.Size)-padding-10).toString()+","+(lineScale(d.Distance)).toString()+"), scale(0.8,0.8)") //https://codepen.io/znak/pen/XXrRvj
+                        .attr("fill","#ee6352")
+                        /*.transition()
+                        .ease(d3.easeLinear)
+                        .duration(d =>d.Distance*10)
+                        .attr("fill",secondary_colour)*/;
+
+                        park
+                        .append("line")
+                        .attr("class","distance_line_animate")
+                        .attr("y1",height-margin.bottom-padding-2)
+                        .attr("x1", d=> xScale(d.Size)-padding-10)
+                        .attr("x2", d=> xScale(d.Size)-padding-10)
+                        .attr("y2",height-margin.bottom-padding-2)
+                        .attr("stroke",secondary_colour)
+                        .attr("stroke-dasharray","4 4")
+                        .attr("stroke-width","4px")
+                        .transition()
+                        .ease(d3.easeLinear)
+                        .duration(d =>d.Distance*10)
+                        .attr("y2",d=> lineScale(d.Distance)+padding);
+                    },animate);
+                    park
+                        .selectAll(".distance_line")
+                        .transition().duration(animate)
+                        .attr("x1", d=> xScale(d.Size)-padding-10)
+                        .attr("x2", d=> xScale(d.Size)-padding-10)
+                        .attr("y2",d=> lineScale(d.Distance)+padding);
+                        
+                    park
+                        .selectAll(".distance_line_animate").remove();   
+
+                    park
+                        .selectAll(".distance_label")
+                        .transition().duration(animate)
+                        .attr("transform", d=> "translate("+(xScale(d.Size)-padding-30).toString()+","+(height-margin.bottom-padding-10).toString()+"),"+"rotate(-90)");
+
+                    park
+                        .selectAll(".distance_endpoint")
+                        .attr("fill","#ee6352")
+                        .transition().duration(animate)
+                        .attr("transform", d=> "translate("+(xScale(d.Size)-padding-10).toString()+","+(lineScale(d.Distance)).toString()+"), scale(0.8,0.8)") //https://codepen.io/znak/pen/XXrRvj
+                        /*.transition()
+                        .ease(d3.easeLinear)
+                        .duration(d =>d.Distance*10)
+                        .attr("fill",secondary_colour)*/;
+
+                    park_exit
+                        .selectAll(".distance_line,.distance_line_animate,.distance_label,.distance_endpoint")
+                        .remove();
+
+                    park_exit
+                        .selectAll(".area")
+                        .attr("fill","grey")
+                        .transition()
+                        .duration(animate)
+                        .attr("width",0)
+                        .attr("height",0)
+                        .attr("y",height-margin.top-margin.bottom)
+                        .attr("x",width-margin.right)
+                        .remove();
+                        
+                    park_exit
+                        .selectAll(".value_label,.area_label")
+                        .remove();
+
+                    park_exit
+                        .transition()
+                        .duration(animate)
+                        .remove();
+                    
+                    svg.select("#xaxis")
+                        .transition()
+                        .duration(animate)
+                        .attr("font-size","15px")
+                        .call(xaxis);
+
+                    svg.select("#yaxis")
+                        .transition()
+                        .duration(animate)
+                        .attr("font-size","15px")
+                        .call(yaxis);
+
+                    d3.select("#yaxis").selectAll(".tick").each(function(d,i){
+                        d3.select(this).selectAll("rect").remove();  
+                        d3.select(this).insert('rect', ':first-child')
+                            .attr('x', -50)
+                            .attr('y', -15)
+                            .attr('height',  +30)
+                            .attr('width',  +42)
+                            .style('fill', "white");      
+                    });
+
+                    d3.select("#xaxis").selectAll(".tick").each(function(d,i){
+                        d3.select(this).selectAll("rect").remove();
+                        d3.select(this).insert('rect', ':first-child')
+                            .attr('x',-25)
+                            .attr('y',+7)
+                            .attr('height',+18)
+                            .attr('width',+50)
+                            .style('fill', "white");      
+                    });
+                    
+                    
+                };             
+            
+            });
+        </script>
+    </body>
+</html>
